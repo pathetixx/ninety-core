@@ -83,6 +83,12 @@ SNI, so rewriting that message is both risky and pointless.
 - `common/tls/utls_client.go` — applied per connection.
 - `common/tls/std_client.go`, `common/tls/reality_client.go` — the refusals.
 
+### Dependency versions
+
+The security-relevant bumps live in `go.mod` here rather than being applied at
+build time by whoever compiles this. `security.yml` in Ninety audits the built
+binary with govulncheck, so a regression shows up there.
+
 ## Build
 
 Pure Go, no cgo. Tags Ninety ships with:
