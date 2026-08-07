@@ -138,5 +138,27 @@ func urlTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 	}
 	resp.Body.Close()
 	t = uint16(time.Since(start) / time.Millisecond)
+
+	// Unified delay: the first request paid for the TCP/TLS handshake, so its
+	// timing describes how far the server is plus how slow the handshake was.
+	// Reuse the established connection for a second HEAD and report that RTT
+	// instead — for VLESS+Reality the handshake inflates the figure 2-3x.
+	if IsUnifiedDelayFromContext(ctx) {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		second := time.Now()
+		// Deliberately not req.WithContext(ctx): the deadline budget was spent
+		// on the first request, and a cancelled second one would drop a good
+		// measurement we already have.
+		resp, err = client.Do(req)
+		if err != nil {
+			return
+		}
+		resp.Body.Close()
+		t = uint16(time.Since(second) / time.Millisecond)
+	}
 	return
 }

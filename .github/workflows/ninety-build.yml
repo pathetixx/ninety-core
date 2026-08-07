@@ -1,0 +1,46 @@
+name: Build check
+
+# Compiles the core exactly the way Ninety ships it: pure Go, no cgo, the same
+# build tags, cross-compiled to windows/amd64. Ninety itself builds on a Windows
+# runner, but with CGO_ENABLED=0 the output is identical, so validating here is
+# cheaper and just as strict.
+
+on:
+  push:
+    branches:
+      - ninety
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TAGS: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_ocm,badlinkname,tfogo_checklinkname0,with_grpc
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.25'
+
+      - name: Vet
+        run: go vet -tags "$TAGS" ./...
+
+      - name: Build (windows/amd64)
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -tags "$TAGS" \
+            -ldflags "-s -w -buildid= -checklinkname=0 -X internal/godebug.defaultGODEBUG=multipathtcp=0" \
+            -o sing-box.exe ./cmd/sing-box
+          ls -lh sing-box.exe
+
+      - name: Test
+        run: go test -tags "$TAGS" ./common/urltest/...

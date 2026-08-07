@@ -17,6 +17,7 @@ import (
 	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/common/taskmonitor"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/experimental"
@@ -139,6 +140,12 @@ func New(options Options) (*Box, error) {
 	}
 	if experimentalOptions.V2RayAPI != nil && experimentalOptions.V2RayAPI.Listen != "" {
 		needV2RayAPI = true
+	}
+	if experimentalOptions.UnifiedDelay != nil && experimentalOptions.UnifiedDelay.Enabled {
+		// Must happen before the outbound groups and the Clash API server are
+		// created: both capture this context, and a flag added later would not
+		// reach them.
+		ctx = urltest.ContextWithIsUnifiedDelay(ctx)
 	}
 	platformInterface := service.FromContext[adapter.PlatformInterface](ctx)
 	var defaultLogWriter io.Writer

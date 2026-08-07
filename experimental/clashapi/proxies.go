@@ -199,7 +199,12 @@ func getProxyDelay(server *Server) func(w http.ResponseWriter, r *http.Request) 
 		}
 
 		proxy := r.Context().Value(CtxKeyProxy).(adapter.Outbound)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*time.Duration(timeout))
+		// server.ctx, not context.Background() or r.Context(): the box services
+		// (RootCAs, NTP) and the unified delay flag live there. Groups get the
+		// flag through their own context; this single-probe endpoint is the one
+		// place that has to pick it up explicitly, and without it every manual
+		// probe reports a cold dial plus handshake instead of a clean RTT.
+		ctx, cancel := context.WithTimeout(server.ctx, time.Millisecond*time.Duration(timeout))
 		defer cancel()
 
 		delay, err := urltest.URLTest(ctx, url, proxy)
