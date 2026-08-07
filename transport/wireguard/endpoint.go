@@ -197,6 +197,7 @@ func (e *Endpoint) Start(resolve bool) error {
 		deviceInput = e.tunDevice
 	}
 	wgDevice := device.NewDevice(e.options.Context, deviceInput, bind, logger, e.options.Workers)
+	wgDevice.Noise = e.options.Noise
 	e.tunDevice.SetDevice(wgDevice)
 	var ipcConf strings.Builder
 	ipcConf.WriteString(e.ipcConf)

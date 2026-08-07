@@ -26,6 +26,23 @@ read 2-3x slower than they are.
 - `experimental/clashapi/proxies.go` — the single `GET /proxies/{name}/delay`
   probe builds its context from `server.ctx`, so it sees the flag too.
 
+### WireGuard junk traffic
+
+`noise` on a WireGuard endpoint sends a burst of random UDP packets before the
+handshake initiation, so a DPI box does not see a WireGuard signature as the
+first thing on the flow. Ninety uses it for WARP.
+
+The implementation lives in
+[ninety-wireguard-go](https://github.com/pathetixx/ninety-wireguard-go), pulled
+in with a `replace` directive. On this side:
+
+- `option/wireguard.go` — the `noise` config field.
+- `transport/wireguard/endpoint_options.go`, `protocol/wireguard/endpoint.go`,
+  `transport/wireguard/endpoint.go` — carry it to the device.
+- `transport/wireguard/client_bind.go` — `SendWithoutModify`, the junk-traffic
+  send path that leaves the payload alone instead of stamping the per-endpoint
+  reserved routing key into it.
+
 ## Build
 
 Pure Go, no cgo. Tags Ninety ships with:

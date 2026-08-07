@@ -162,6 +162,30 @@ func (c *ClientBind) SetMark(mark uint32) error {
 	return nil
 }
 
+// SendWithoutModify is Send without the reserved-byte rewrite. Junk packets are
+// not WireGuard packets: stamping a routing key into their 2nd-4th bytes would
+// make the very traffic meant to look random identifiable again.
+func (c *ClientBind) SendWithoutModify(bufs [][]byte, ep conn.Endpoint, offset int) error {
+	udpConn, err := c.connect()
+	if err != nil {
+		c.pauseManager.WaitActive()
+		time.Sleep(time.Second)
+		return err
+	}
+	destination := netip.AddrPort(ep.(remoteEndpoint))
+	for _, buf := range bufs {
+		if offset > 0 {
+			buf = buf[offset:]
+		}
+		_, err = udpConn.WriteToUDPAddrPort(buf, destination)
+		if err != nil {
+			udpConn.Close()
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *ClientBind) Send(bufs [][]byte, ep conn.Endpoint, offset int) error {
 	udpConn, err := c.connect()
 	if err != nil {

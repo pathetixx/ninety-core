@@ -4,6 +4,7 @@ import (
 	"net/netip"
 
 	"github.com/sagernet/sing/common/json/badoption"
+	"github.com/sagernet/wireguard-go/noise"
 )
 
 type WireGuardEndpointOptions struct {
@@ -17,6 +18,10 @@ type WireGuardEndpointOptions struct {
 	UDPTimeout badoption.Duration               `json:"udp_timeout,omitempty"`
 	Workers    int                              `json:"workers,omitempty"`
 	DialerOptions
+
+	// Noise sends junk traffic before the handshake initiation, so a DPI box
+	// does not see a WireGuard signature as the first thing on the flow.
+	Noise noise.Options `json:"noise,omitempty"`
 }
 
 type WireGuardPeer struct {
