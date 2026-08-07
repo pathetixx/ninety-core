@@ -62,6 +62,27 @@ them, and an unused strategy is an untested one.
 - `protocol/group/balancer.go` — the group.
 - `constant/proxy.go`, `include/registry.go` — type and registration.
 
+### TLS tricks
+
+`tls.tls_tricks` on an outbound, aimed at DPI that matches on the ClientHello:
+
+- `mixedcase_sni` randomises the letter case of the SNI, drawn again per
+  connection. Hostnames are case-insensitive, so neither the handshake nor the
+  certificate check changes; a filter comparing the SNI byte-for-byte does.
+- `padding_size` is a `"from-to"` byte range for the ClientHello padding
+  extension, drawn again per handshake, so the message stops landing on the one
+  length its fingerprint always produces.
+
+Both need the uTLS client, and both are refused - loudly, not ignored - for the
+plain client and for REALITY. REALITY seals its authentication over the whole
+ClientHello and already sends a byte-exact browser fingerprint with a genuine
+SNI, so rewriting that message is both risky and pointless.
+
+- `option/tls_tricks.go`, `option/tls.go` — the options.
+- `common/tls/tls_tricks.go` — the SNI and padding helpers.
+- `common/tls/utls_client.go` — applied per connection.
+- `common/tls/std_client.go`, `common/tls/reality_client.go` — the refusals.
+
 ## Build
 
 Pure Go, no cgo. Tags Ninety ships with:

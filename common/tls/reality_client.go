@@ -55,6 +55,13 @@ func NewRealityClient(ctx context.Context, logger logger.ContextLogger, serverAd
 	if options.UTLS == nil || !options.UTLS.Enabled {
 		return nil, E.New("uTLS is required by reality client")
 	}
+	// REALITY authenticates by sealing over the entire ClientHello and already
+	// sends a byte-exact browser fingerprint with a genuine SNI, which is the
+	// whole point of it. Rewriting that message is both risky and pointless, so
+	// say so instead of silently dropping the setting.
+	if options.TLSTricks != nil && (options.TLSTricks.MixedCaseSNI || options.TLSTricks.PaddingSize != "") {
+		return nil, E.New("tls_tricks are not applicable to reality")
+	}
 
 	uClient, err := NewUTLSClient(ctx, logger, serverAddress, options)
 	if err != nil {

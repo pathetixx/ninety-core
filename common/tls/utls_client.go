@@ -32,6 +32,9 @@ type UTLSClientConfig struct {
 	fragment              bool
 	fragmentFallbackDelay time.Duration
 	recordFragment        bool
+	mixedCaseSNI          bool
+	paddingFrom           int
+	paddingTo             int
 }
 
 func (c *UTLSClientConfig) ServerName() string {
@@ -61,7 +64,24 @@ func (c *UTLSClientConfig) Client(conn net.Conn) (Conn, error) {
 	if c.recordFragment {
 		conn = tf.NewConn(conn, c.ctx, c.fragment, c.recordFragment, c.fragmentFallbackDelay)
 	}
-	return &utlsALPNWrapper{utlsConnWrapper{utls.UClient(conn, c.config.Clone(), c.id)}, c.config.NextProtos}, nil
+	config := c.config.Clone()
+	// Per connection, not per config: repeating one casing would be its own
+	// fingerprint.
+	if c.mixedCaseSNI {
+		config.ServerName = mixedCaseServerName(config.ServerName)
+	}
+	if c.paddingTo > 0 {
+		spec, err := paddedSpec(c.id, c.paddingFrom, c.paddingTo)
+		if err != nil {
+			return nil, err
+		}
+		uConn := utls.UClient(conn, config, utls.HelloCustom)
+		if err = uConn.ApplyPreset(spec); err != nil {
+			return nil, err
+		}
+		return &utlsALPNWrapper{utlsConnWrapper{uConn}, config.NextProtos}, nil
+	}
+	return &utlsALPNWrapper{utlsConnWrapper{utls.UClient(conn, config, c.id)}, config.NextProtos}, nil
 }
 
 func (c *UTLSClientConfig) SetSessionIDGenerator(generator func(clientHello []byte, sessionID []byte) error) {
@@ -71,6 +91,7 @@ func (c *UTLSClientConfig) SetSessionIDGenerator(generator func(clientHello []by
 func (c *UTLSClientConfig) Clone() Config {
 	return &UTLSClientConfig{
 		c.ctx, c.config.Clone(), c.id, c.fragment, c.fragmentFallbackDelay, c.recordFragment,
+		c.mixedCaseSNI, c.paddingFrom, c.paddingTo,
 	}
 }
 
@@ -255,7 +276,14 @@ func NewUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddre
 	if err != nil {
 		return nil, err
 	}
-	var config Config = &UTLSClientConfig{ctx, &tlsConfig, id, options.Fragment, time.Duration(options.FragmentFallbackDelay), options.RecordFragment}
+	paddingFrom, paddingTo, err := options.TLSTricks.ParsePaddingSize()
+	if err != nil {
+		return nil, err
+	}
+	var config Config = &UTLSClientConfig{
+		ctx, &tlsConfig, id, options.Fragment, time.Duration(options.FragmentFallbackDelay), options.RecordFragment,
+		options.TLSTricks != nil && options.TLSTricks.MixedCaseSNI, paddingFrom, paddingTo,
+	}
 	if options.ECH != nil && options.ECH.Enabled {
 		if options.Reality != nil && options.Reality.Enabled {
 			return nil, E.New("Reality is conflict with ECH")

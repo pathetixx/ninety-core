@@ -84,6 +84,11 @@ func NewSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
 	if serverName == "" && !options.Insecure {
 		return nil, E.New("missing server_name or insecure=true")
 	}
+	// Both tricks rewrite the ClientHello, which only the uTLS client builds.
+	// Failing here beats accepting a setting that would quietly do nothing.
+	if options.TLSTricks != nil && (options.TLSTricks.MixedCaseSNI || options.TLSTricks.PaddingSize != "") {
+		return nil, E.New("tls_tricks require utls to be enabled")
+	}
 
 	var tlsConfig tls.Config
 	tlsConfig.Time = ntp.TimeFuncFromContext(ctx)
