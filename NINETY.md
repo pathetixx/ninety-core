@@ -43,6 +43,25 @@ in with a `replace` directive. On this side:
   send path that leaves the payload alone instead of stamping the per-endpoint
   reserved routing key into it.
 
+### Balancer outbound
+
+`type: "balancer"` routes each new connection through the lowest-delay outbound
+of its group and interrupts existing connections when the leader changes. Ninety
+exposes it as "Auto".
+
+It measures nothing itself: delays come from the shared URLTest history, which a
+`urltest` group over the same outbounds keeps up to date, so one health check
+feeds both the UI and this group. A failed dial drops that outbound's
+measurement, so it sorts last until the next check produces a fresh one.
+
+Only `lowest-delay` is implemented. The upstream this was modelled on also had
+round-robin, consistent-hashing and sticky-sessions strategies; Ninety never used
+them, and an unused strategy is an untested one.
+
+- `option/balancer.go` — the options.
+- `protocol/group/balancer.go` — the group.
+- `constant/proxy.go`, `include/registry.go` — type and registration.
+
 ## Build
 
 Pure Go, no cgo. Tags Ninety ships with:
