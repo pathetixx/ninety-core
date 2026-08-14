@@ -9,6 +9,10 @@ into `ninety`.
 
 Base: **v1.13.18**
 
+`upstream-watch.yml` reads that line every Monday, compares it with the latest
+upstream release and opens a PR (clean merge) or an issue (conflicts). Keep the
+format as-is when moving to a new base.
+
 ## Delta to upstream
 
 ### Unified delay

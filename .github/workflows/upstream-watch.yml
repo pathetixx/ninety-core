@@ -1,0 +1,151 @@
+name: Upstream watch
+
+# Ninety pins this fork by exact tag and commit, so an upstream release reaches
+# it only when somebody moves the base. This job is that somebody's reminder: it
+# tries the merge every Monday and reports what it found - a PR when the merge is
+# clean, an issue when it is not.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Compare the base with the latest upstream release
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="$(sed -n 's/^Base: \*\*\(v[0-9][0-9.]*\)\*\*$/\1/p' NINETY.md | head -1)"
+          if [ -z "$base" ]; then
+            echo "No 'Base: **vX.Y.Z**' line in NINETY.md." >&2
+            exit 1
+          fi
+          latest="$(gh api repos/SagerNet/sing-box/releases --jq \
+            'map(select(.prerelease == false and .draft == false)) | .[0].tag_name')"
+          echo "base=$base"     >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [ "$base" = "$latest" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+            echo "Base $base is the latest upstream release."
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+            echo "Base $base, upstream is at $latest."
+          fi
+
+      # An open PR or issue for this exact tag means the previous run already
+      # reported it and nobody has acted yet. Reporting it again adds noise.
+      - name: Check whether this tag was already reported
+        id: reported
+        if: steps.compare.outputs.up_to_date == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.compare.outputs.latest }}
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list --state open --head "upstream-sync/$LATEST" --json number --jq 'length')"
+          issues="$(gh issue list --state open --label upstream-sync --search "$LATEST in:title" --json number --jq 'length')"
+          if [ "$prs" != "0" ] || [ "$issues" != "0" ]; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "$LATEST is already reported (prs=$prs issues=$issues)."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Try the merge
+        id: merge
+        if: steps.compare.outputs.up_to_date == 'false' && steps.reported.outputs.already == 'false'
+        env:
+          LATEST: ${{ steps.compare.outputs.latest }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/SagerNet/sing-box.git
+          git fetch --no-tags upstream "refs/tags/$LATEST:refs/tags/$LATEST"
+          git checkout -b "upstream-sync/$LATEST"
+          if git merge --no-edit "$LATEST"; then
+            sed -i "s/^Base: \*\*v[0-9][0-9.]*\*\*$/Base: **$LATEST**/" NINETY.md
+            git commit -q -am "Move the base to $LATEST" || true
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only --diff-filter=U > /tmp/conflicts.txt
+            git merge --abort
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+            {
+              echo 'conflicts<<EOF'
+              cat /tmp/conflicts.txt
+              echo EOF
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the pull request
+        if: steps.merge.outputs.clean == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ steps.compare.outputs.base }}
+          LATEST: ${{ steps.compare.outputs.latest }}
+        run: |
+          set -euo pipefail
+          git push --force-with-lease origin "HEAD:upstream-sync/$LATEST"
+          printf '%s\n' \
+            "\`$BASE\` -> \`$LATEST\` merged without conflicts. Whether the Ninety patches" \
+            "still compile on top of it is what Build check answers - a PR opened by Actions" \
+            "does not start it on its own, so this job dispatches it on the branch." \
+            "" \
+            "Merging here ships nothing: Ninety pins \`CORE_TAG\`/\`CORE_SHA\` in" \
+            "\`.github/workflows/build.yml\` and \`.github/workflows/security.yml\`. After this" \
+            "lands, tag the fork and move both pins." \
+            "" \
+            "Upstream release notes: https://github.com/SagerNet/sing-box/releases/tag/$LATEST" \
+            > /tmp/body.md
+          gh pr create \
+            --base ninety \
+            --head "upstream-sync/$LATEST" \
+            --title "Move the base to $LATEST" \
+            --body-file /tmp/body.md
+          gh workflow run ninety-build.yml --ref "upstream-sync/$LATEST" ||
+            echo "Could not dispatch Build check; start it by hand."
+
+      - name: Open the issue
+        if: steps.merge.outputs.clean == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ steps.compare.outputs.base }}
+          LATEST: ${{ steps.compare.outputs.latest }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          set -euo pipefail
+          gh label create upstream-sync --color ededed \
+            --description "Upstream sing-box releases" 2>/dev/null || true
+          {
+            printf '%s\n' \
+              "Merging \`$LATEST\` into \`ninety\` (base \`$BASE\`) stops on these files:" \
+              "" \
+              '```'
+            printf '%s\n' "$CONFLICTS"
+            printf '%s\n' \
+              '```' \
+              "" \
+              "Resolve locally, then tag the fork and move \`CORE_TAG\`/\`CORE_SHA\` in Ninety's" \
+              "\`.github/workflows/build.yml\` and \`.github/workflows/security.yml\`." \
+              "" \
+              "Upstream release notes: https://github.com/SagerNet/sing-box/releases/tag/$LATEST"
+          } > /tmp/body.md
+          gh issue create \
+            --title "Upstream $LATEST conflicts with the Ninety patches" \
+            --label upstream-sync \
+            --body-file /tmp/body.md
