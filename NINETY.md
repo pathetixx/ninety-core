@@ -7,7 +7,7 @@ Branch `ninety` carries the patches Ninety needs on top of an upstream tag.
 `upstream` remote points at SagerNet; updating means merging a new upstream tag
 into `ninety`.
 
-Base: **v1.13.16**
+Base: **v1.13.18**
 
 ## Delta to upstream
 
