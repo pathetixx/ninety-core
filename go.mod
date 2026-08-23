@@ -167,4 +167,4 @@ require (
 	lukechampine.com/blake3 v1.3.0 // indirect
 )
 
-replace github.com/sagernet/wireguard-go => github.com/pathetixx/ninety-wireguard-go v0.0.0-20260823124940-dea88ae6ac9a
+replace github.com/sagernet/wireguard-go => github.com/pathetixx/ninety-wireguard-go v0.0.0-20260823135228-1e2be27b117f

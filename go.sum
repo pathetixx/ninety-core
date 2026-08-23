@@ -142,8 +142,8 @@ github.com/openai/openai-go/v3 v3.26.0 h1:bRt6H/ozMNt/dDkN4gobnLqaEGrRGBzmbVs0xx
 github.com/openai/openai-go/v3 v3.26.0/go.mod h1:cdufnVK14cWcT9qA1rRtrXx4FTRsgbDPW7Ia7SS5cZo=
 github.com/oschwald/maxminddb-golang v1.13.1 h1:G3wwjdN9JmIK2o/ermkHM+98oX5fS+k5MbwsmL4MRQE=
 github.com/oschwald/maxminddb-golang v1.13.1/go.mod h1:K4pgV9N/GcK694KSTmVSDTODk4IsCNThNdTmnaBZ/F8=
-github.com/pathetixx/ninety-wireguard-go v0.0.0-20260823124940-dea88ae6ac9a h1:p4u05DMvE5qamx0qf9utu7bKoT6XrHFFVzfW1iqdyJ0=
-github.com/pathetixx/ninety-wireguard-go v0.0.0-20260823124940-dea88ae6ac9a/go.mod h1:hEqi4y5czEg6LYtX2Bpjg+lV0b/J1n+5rA885Z66Mx0=
+github.com/pathetixx/ninety-wireguard-go v0.0.0-20260823135228-1e2be27b117f h1:RgZ4rOJ7Ljl8zQ80B9KCrJ8pEfu1ji/91RR8DWEZZ5g=
+github.com/pathetixx/ninety-wireguard-go v0.0.0-20260823135228-1e2be27b117f/go.mod h1:hEqi4y5czEg6LYtX2Bpjg+lV0b/J1n+5rA885Z66Mx0=
 github.com/pierrec/lz4/v4 v4.1.21 h1:yOVMLb6qSIDP67pl/5F7RepeKYu/VmTyEXvuMI5d9mQ=
 github.com/pierrec/lz4/v4 v4.1.21/go.mod h1:gZWDp/Ze/IJXGXf23ltt2EXimqmTUXEy0GFuRQyBid4=
 github.com/pires/go-proxyproto v0.8.1 h1:9KEixbdJfhrbtjpz/ZwCdWDD2Xem0NZ38qMYaASJgp0=
