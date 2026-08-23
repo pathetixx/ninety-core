@@ -46,6 +46,11 @@ func NewEndpoint(options EndpointOptions) (*Endpoint, error) {
 	if options.PrivateKey == "" {
 		return nil, E.New("missing private key")
 	}
+	// Shaping is checked here rather than when the device starts: a rejected
+	// value otherwise shows up as a tunnel that never completes a handshake.
+	if err := options.Noise.Amnezia.Validate(); err != nil {
+		return nil, err
+	}
 	privateKeyBytes, err := base64.StdEncoding.DecodeString(options.PrivateKey)
 	if err != nil {
 		return nil, E.Cause(err, "decode private key")
@@ -86,6 +91,13 @@ func NewEndpoint(options EndpointOptions) (*Endpoint, error) {
 				return nil, E.New("invalid reserved value for peer ", peerIndex, ", required 3 bytes, got ", len(peer.reserved))
 			}
 			copy(peer.reserved[:], rawPeer.Reserved[:])
+			// The reserved bytes are stamped into bytes 2-4 of every outgoing
+			// packet. Under AmneziaWG shaping those bytes belong to a magic
+			// header or to handshake padding, so the two cannot be combined:
+			// the peer would drop everything and the tunnel would never come up.
+			if peer.reserved != [3]byte{} && options.Noise.Amnezia.Enabled() {
+				return nil, E.New("peer ", peerIndex, ": reserved bytes cannot be combined with amnezia shaping")
+			}
 		}
 		peers = append(peers, peer)
 	}
@@ -197,7 +209,10 @@ func (e *Endpoint) Start(resolve bool) error {
 		deviceInput = e.tunDevice
 	}
 	wgDevice := device.NewDevice(e.options.Context, deviceInput, bind, logger, e.options.Workers)
-	wgDevice.Noise = e.options.Noise
+	if err = wgDevice.SetNoise(e.options.Noise); err != nil {
+		wgDevice.Close()
+		return E.Cause(err, "setup wireguard noise")
+	}
 	e.tunDevice.SetDevice(wgDevice)
 	var ipcConf strings.Builder
 	ipcConf.WriteString(e.ipcConf)

@@ -30,11 +30,15 @@ read 2-3x slower than they are.
 - `experimental/clashapi/proxies.go` — the single `GET /proxies/{name}/delay`
   probe builds its context from `server.ctx`, so it sees the flag too.
 
-### WireGuard junk traffic
+### WireGuard junk traffic and AmneziaWG shaping
 
-`noise` on a WireGuard endpoint sends a burst of random UDP packets before the
-handshake initiation, so a DPI box does not see a WireGuard signature as the
-first thing on the flow. Ninety uses it for WARP.
+`noise` on a WireGuard endpoint covers two things. `noise.fake_packet` sends a
+burst of random UDP packets before the handshake initiation, so a DPI box does
+not see a WireGuard signature as the first thing on the flow; Ninety uses it for
+WARP. `noise.amnezia` carries an AmneziaWG `.conf` verbatim — `jc`/`jmin`/`jmax`
+junk packets, `s1`/`s2` handshake padding, `h1`..`h4` message types and the
+`i1`..`i5` specified packets — so a profile imported from a file speaks the same
+protocol its peer does.
 
 The implementation lives in
 [ninety-wireguard-go](https://github.com/pathetixx/ninety-wireguard-go), pulled
@@ -42,10 +46,15 @@ in with a `replace` directive. On this side:
 
 - `option/wireguard.go` — the `noise` config field.
 - `transport/wireguard/endpoint_options.go`, `protocol/wireguard/endpoint.go`,
-  `transport/wireguard/endpoint.go` — carry it to the device.
+  `transport/wireguard/endpoint.go` — carry it to the device. Shaping is
+  validated when the endpoint is built and installed with `Device.SetNoise`,
+  because both kinds of rejection would otherwise appear as a tunnel that never
+  completes a handshake and says nothing about why.
 - `transport/wireguard/client_bind.go` — `SendWithoutModify`, the junk-traffic
   send path that leaves the payload alone instead of stamping the per-endpoint
-  reserved routing key into it.
+  reserved routing key into it. A shaped device sends everything this way, so
+  reserved bytes and `noise.amnezia` on one peer are rejected as a conflict:
+  those bytes land inside a magic header or inside handshake padding.
 
 ### Balancer outbound
 
