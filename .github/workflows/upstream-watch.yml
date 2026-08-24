@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           prs="$(gh pr list --state open --head "upstream-sync/$LATEST" --json number --jq 'length')"
-          issues="$(gh issue list --state open --label upstream-sync --search "$LATEST in:title" --json number --jq 'length')"
+          issues="$(gh issue list --state open --label upstream-sync --search "$LATEST in:title" --json number --jq 'length' 2>/dev/null || echo 0)"
           if [ "$prs" != "0" ] || [ "$issues" != "0" ]; then
             echo "already=true" >> "$GITHUB_OUTPUT"
             echo "$LATEST is already reported (prs=$prs issues=$issues)."
@@ -129,8 +129,17 @@ jobs:
           CONFLICTS: ${{ steps.merge.outputs.conflicts }}
         run: |
           set -euo pipefail
-          gh label create upstream-sync --color ededed \
-            --description "Upstream sing-box releases" 2>/dev/null || true
+          # The label is cosmetic, the issue is the signal. Creating it used to
+          # be best-effort with its error thrown away, and when it failed
+          # `gh issue create --label` refused to open the issue at all: the run
+          # went red and the upstream release was reported nowhere.
+          label_args=()
+          if gh label create upstream-sync --color ededed \
+               --description "Upstream sing-box releases" --force; then
+            label_args=(--label upstream-sync)
+          else
+            echo "Could not create the upstream-sync label; opening the issue without it." >&2
+          fi
           {
             printf '%s\n' \
               "Merging \`$LATEST\` into \`ninety\` (base \`$BASE\`) stops on these files:" \
@@ -147,5 +156,5 @@ jobs:
           } > /tmp/body.md
           gh issue create \
             --title "Upstream $LATEST conflicts with the Ninety patches" \
-            --label upstream-sync \
+            ${label_args[@]+"${label_args[@]}"} \
             --body-file /tmp/body.md
