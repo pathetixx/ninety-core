@@ -18,6 +18,13 @@ permissions:
 jobs:
   watch:
     runs-on: ubuntu-latest
+    # gh resolves the repository from the git remotes, and the merge step adds
+    # `upstream` pointing at SagerNet/sing-box. Every gh call after it then
+    # addressed the upstream repository instead of this fork and died on 403 -
+    # which is why the conflict path could never open its issue here. GH_REPO
+    # pins the target for the whole job.
+    env:
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
