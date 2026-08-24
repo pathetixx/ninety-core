@@ -7,7 +7,7 @@ Branch `ninety` carries the patches Ninety needs on top of an upstream tag.
 `upstream` remote points at SagerNet; updating means merging a new upstream tag
 into `ninety`.
 
-Base: **v1.13.18**
+Base: **v1.13.19**
 
 `upstream-watch.yml` reads that line every Monday, compares it with the latest
 upstream release and opens a PR (clean merge) or an issue (conflicts). Keep the
