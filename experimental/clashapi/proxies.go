@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -187,10 +186,12 @@ func updateProxy(w http.ResponseWriter, r *http.Request) {
 func getProxyDelay(server *Server) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
+		// An http:// target used to be dropped here, falling back to the
+		// built-in https one. Group checks honour whatever URL they were
+		// configured with, so the two paths measured different hosts and their
+		// numbers could not be compared - which is exactly what the UI does
+		// when it decides whether the balancer picked well.
 		url := query.Get("url")
-		if strings.HasPrefix(url, "http://") {
-			url = ""
-		}
 		timeout, err := strconv.ParseInt(query.Get("timeout"), 10, 16)
 		if err != nil {
 			render.Status(r, http.StatusBadRequest)
