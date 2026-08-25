@@ -401,6 +401,33 @@ func (s *Balancer) updateLeader() {
 	s.interruptGroup.Interrupt(s.interruptExternalConnections)
 }
 
+// leaderFor returns the outbound to carry a connection of this network. The
+// leader normally is it, but a leader elected on TCP delays may have UDP
+// disabled, and answering "missing supported outbound" to every UDP dial
+// breaks QUIC and DNS over the tunnel while a perfectly good member sits
+// unused. The election itself is left alone: one UDP dial must not hand the
+// whole group to another node.
+func (s *Balancer) leaderFor(network string) adapter.Outbound {
+	leader := s.leader.Load()
+	if leader != nil && common.Contains(leader.Network(), network) {
+		return leader
+	}
+	now := time.Now()
+	var (
+		best      adapter.Outbound
+		bestDelay = timeoutDelay
+	)
+	for _, detour := range s.ordered {
+		if !common.Contains(detour.Network(), network) || s.cooling(detour, now) {
+			continue
+		}
+		if delay := s.delay(detour); best == nil || delay < bestDelay {
+			best, bestDelay = detour, delay
+		}
+	}
+	return best
+}
+
 func (s *Balancer) Network() []string {
 	leader := s.leader.Load()
 	if leader == nil {
@@ -422,8 +449,8 @@ func (s *Balancer) All() []string {
 }
 
 func (s *Balancer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	leader := s.leader.Load()
-	if !common.Contains(leader.Network(), network) {
+	leader := s.leaderFor(network)
+	if leader == nil {
 		return nil, E.New("missing supported outbound")
 	}
 	conn, err := leader.DialContext(ctx, network, destination)
@@ -437,8 +464,8 @@ func (s *Balancer) DialContext(ctx context.Context, network string, destination 
 }
 
 func (s *Balancer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	leader := s.leader.Load()
-	if !common.Contains(leader.Network(), N.NetworkUDP) {
+	leader := s.leaderFor(N.NetworkUDP)
+	if leader == nil {
 		return nil, E.New("missing supported outbound")
 	}
 	conn, err := leader.ListenPacket(ctx, destination)
@@ -462,9 +489,9 @@ func (s *Balancer) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn,
 }
 
 func (s *Balancer) NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	leader := s.leader.Load()
-	if !common.Contains(leader.Network(), metadata.Network) {
-		return nil, E.New(metadata.Network, " is not supported by outbound: ", leader.Tag())
+	leader := s.leaderFor(metadata.Network)
+	if leader == nil {
+		return nil, E.New(metadata.Network, " is not supported by any outbound in: ", s.Tag())
 	}
 	return leader.(adapter.DirectRouteOutbound).NewDirectRouteConnection(metadata, routeContext, timeout)
 }

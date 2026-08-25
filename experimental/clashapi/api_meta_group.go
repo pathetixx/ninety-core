@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -67,10 +66,9 @@ func getGroupDelay(server *Server) func(w http.ResponseWriter, r *http.Request) 
 		}
 
 		query := r.URL.Query()
+		// Kept in step with the single-proxy endpoint: an http:// target is a
+		// valid probe target, not a reason to silently measure another host.
 		url := query.Get("url")
-		if strings.HasPrefix(url, "http://") {
-			url = ""
-		}
 		timeout, err := strconv.ParseInt(query.Get("timeout"), 10, 32)
 		if err != nil {
 			render.Status(r, http.StatusBadRequest)
