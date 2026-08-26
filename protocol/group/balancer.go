@@ -52,8 +52,12 @@ const timeoutDelay uint16 = 65535
 const leaderPollInterval = time.Second
 
 const (
-	defaultCheckInterval   = 3 * time.Minute
-	defaultConcurrency     = 16
+	defaultCheckInterval = 3 * time.Minute
+	// A sweep is almost entirely spent waiting on nodes that will never answer,
+	// so its wall time is set by how many of those are waited on at once. On a
+	// few-hundred-node subscription 16 at a time meant minutes before the group
+	// had a full picture to elect from.
+	defaultConcurrency     = 24
 	defaultFailureCooldown = 30 * time.Second
 	// A node that keeps failing backs off exponentially, but never past this:
 	// subscriptions recover, and a permanently sidelined node is a lost node.
@@ -61,7 +65,9 @@ const (
 	// Per-probe budget. C.TCPTimeout (15s) is the dial budget for real traffic;
 	// for a health check it only means a sweep over a few hundred dead nodes
 	// takes minutes, and the group has nothing to elect until it finishes.
-	probeTimeout = 6 * time.Second
+	// Five seconds still clears a distant node comfortably: a probe costs about
+	// four round trips, so even at 800ms it lands well inside the budget.
+	probeTimeout = 5 * time.Second
 	// Ceiling for out-of-band re-probes. A censor that rejects every handshake
 	// produces failures far faster than probes complete, and without a cap the
 	// group would answer that with hundreds of parallel dials.
