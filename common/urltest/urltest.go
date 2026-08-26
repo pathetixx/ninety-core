@@ -84,6 +84,11 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (uint16, error) 
 	return urlTest(ctx, link, detour)
 }
 
+// unifiedProbeTimeout bounds the second, connection-reuse HEAD of a unified
+// delay measurement. The connection is already up, so a healthy server answers
+// in one round trip; anything longer is a server that stopped talking.
+const unifiedProbeTimeout = 5 * time.Second
+
 func urlTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err error) {
 	if link == "" {
 		link = "https://www.gstatic.com/generate_204"
@@ -150,10 +155,15 @@ func urlTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 		default:
 		}
 		second := time.Now()
-		// Deliberately not req.WithContext(ctx): the deadline budget was spent
-		// on the first request, and a cancelled second one would drop a good
-		// measurement we already have.
-		resp, err = client.Do(req)
+		// Not req.WithContext(ctx): the deadline budget was spent on the first
+		// request, and a cancelled second one would drop a good measurement we
+		// already have. It still needs a bound of its own, though - a server
+		// that accepts the connection and then goes quiet would otherwise hold
+		// this probe for the client's full timeout, and a caller waiting on a
+		// batch of probes waits with it.
+		secondCtx, cancelSecond := context.WithTimeout(context.Background(), unifiedProbeTimeout)
+		defer cancelSecond()
+		resp, err = client.Do(req.WithContext(secondCtx))
 		if err != nil {
 			return
 		}

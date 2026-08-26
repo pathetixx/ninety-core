@@ -105,12 +105,16 @@ type Balancer struct {
 	interruptGroup               *interrupt.Group
 	interruptExternalConnections bool
 	pause                        pause.Manager
-	checking                     atomic.Bool
-	failAccess                   sync.Mutex
-	failures                     map[string]failureState
-	rotation                     atomic.Uint64
-	rechecks                     atomic.Int64
-	close                        chan struct{}
+	// Момент старта текущего свипа (unix nano), 0 — свипа нет. Голый флаг
+	// «идёт проверка» здесь не годится: свип, который почему-либо не дошёл до
+	// конца, оставлял его поднятым навсегда, и группа больше не измеряла
+	// ничего — ни по расписанию, ни по запросу извне.
+	checkingSince atomic.Int64
+	failAccess    sync.Mutex
+	failures      map[string]failureState
+	rotation      atomic.Uint64
+	rechecks      atomic.Int64
+	close         chan struct{}
 }
 
 // failureState is what an outbound earned by failing to carry traffic, as
@@ -246,12 +250,44 @@ func (s *Balancer) URLTest(ctx context.Context) (map[string]uint16, error) {
 	return s.checkOutbounds(ctx, true)
 }
 
+// sweepBudget bounds one full pass. It is generous - a few hundred unreachable
+// nodes take minutes - but finite: past it the pass is abandoned, so a probe
+// that never returns cannot keep the group from measuring again.
+func (s *Balancer) sweepBudget() time.Duration {
+	budget := s.interval
+	if budget < 2*time.Minute {
+		budget = 2 * time.Minute
+	}
+	return budget
+}
+
+// beginCheck claims the right to sweep. A pass still marked as running past
+// twice its budget is treated as lost, and a new one takes over.
+func (s *Balancer) beginCheck() bool {
+	now := time.Now().UnixNano()
+	previous := s.checkingSince.Load()
+	if previous != 0 && now-previous < int64(2*s.sweepBudget()) {
+		return false
+	}
+	if !s.checkingSince.CompareAndSwap(previous, now) {
+		return false
+	}
+	if previous != 0 {
+		s.logger.Warn("previous health sweep never finished, starting a new one")
+	}
+	return true
+}
+
 func (s *Balancer) checkOutbounds(ctx context.Context, force bool) (map[string]uint16, error) {
 	result := make(map[string]uint16)
-	if s.checking.Swap(true) {
+	if !s.beginCheck() {
 		return result, nil
 	}
-	defer s.checking.Store(false)
+	defer s.checkingSince.Store(0)
+	// Общий дедлайн на весь проход, а не только на отдельную пробу: одна
+	// зависшая проба иначе держит весь батч, а с ним и всю группу.
+	ctx, cancelSweep := context.WithTimeout(ctx, s.sweepBudget())
+	defer cancelSweep()
 	b, _ := batch.New(ctx, batch.WithConcurrencyNum[any](s.concurrency))
 	checked := make(map[string]bool)
 	var resultAccess sync.Mutex
