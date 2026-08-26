@@ -62,6 +62,10 @@ const (
 	// for a health check it only means a sweep over a few hundred dead nodes
 	// takes minutes, and the group has nothing to elect until it finishes.
 	probeTimeout = 6 * time.Second
+	// Ceiling for out-of-band re-probes. A censor that rejects every handshake
+	// produces failures far faster than probes complete, and without a cap the
+	// group would answer that with hundreds of parallel dials.
+	maxConcurrentRechecks = 8
 )
 
 // Balancer routes each new connection through the lowest-delay outbound of its
@@ -99,6 +103,7 @@ type Balancer struct {
 	failAccess                   sync.Mutex
 	failures                     map[string]failureState
 	rotation                     atomic.Uint64
+	rechecks                     atomic.Int64
 	close                        chan struct{}
 }
 
@@ -280,8 +285,10 @@ func (s *Balancer) checkOutbounds(ctx context.Context, force bool) (map[string]u
 				Time:  time.Now(),
 				Delay: t,
 			})
-			// A node that answers a probe again has served its cooldown.
-			s.clearFailure(realTag)
+			// The cooldown is deliberately left alone: answering a probe is not
+			// the same as being able to carry traffic. A node whose TLS is
+			// rejected by the censor still answers probes just fine. Only a
+			// real connection through it clears the penalty.
 			resultAccess.Lock()
 			result[tag] = t
 			resultAccess.Unlock()
@@ -338,6 +345,40 @@ func (s *Balancer) penalize(detour adapter.Outbound) {
 	if !measured {
 		s.rotation.Add(1)
 	}
+	s.updateLeader()
+	// Re-measure right away instead of waiting out the interval. Without this
+	// a node that failed once is left with no measurement at all, so it cannot
+	// be elected again until the next sweep - up to a full interval away, and
+	// after a burst of failures that leaves the group with nothing to choose
+	// between. The cooldown, not the missing measurement, is what keeps it out
+	// of the running in the meantime.
+	go s.recheck(detour)
+}
+
+// recheck refreshes one outbound's measurement out of band. Concurrency is
+// capped: a burst of failures must not turn into a burst of probes.
+func (s *Balancer) recheck(detour adapter.Outbound) {
+	if s.rechecks.Add(1) > maxConcurrentRechecks {
+		s.rechecks.Add(-1)
+		return
+	}
+	defer s.rechecks.Add(-1)
+	tag := RealTag(detour)
+	probe, loaded := s.outbound.Outbound(tag)
+	if !loaded {
+		return
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, probeTimeout)
+	defer cancel()
+	delay, err := urltest.URLTest(ctx, s.link, probe)
+	if err != nil {
+		s.logger.Debug("outbound ", tag, " unavailable: ", err)
+		return
+	}
+	s.history.StoreURLTestHistory(tag, &adapter.URLTestHistory{
+		Time:  time.Now(),
+		Delay: delay,
+	})
 	s.updateLeader()
 }
 
