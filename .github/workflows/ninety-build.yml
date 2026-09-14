@@ -29,7 +29,9 @@ jobs:
           go-version: '1.26'
 
       - name: Vet
-        run: go vet -tags "$TAGS" ./...
+        # unsafeptr flags upstream's own daemon and libbox code, which this fork
+        # does not touch; every other vet check still applies.
+        run: go vet -unsafeptr=false -tags "$TAGS" ./...
 
       - name: Build (windows/amd64)
         env:
