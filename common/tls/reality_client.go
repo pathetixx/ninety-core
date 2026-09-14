@@ -52,6 +52,10 @@ type RealityClientConfig struct {
 }
 
 func NewRealityClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
+	return newRealityClient(ctx, logger, serverAddress, options, false)
+}
+
+func newRealityClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions, allowEmptyServerName bool) (Config, error) {
 	if options.UTLS == nil || !options.UTLS.Enabled {
 		return nil, E.New("uTLS is required by reality client")
 	}
@@ -62,8 +66,11 @@ func NewRealityClient(ctx context.Context, logger logger.ContextLogger, serverAd
 	if options.TLSTricks != nil && (options.TLSTricks.MixedCaseSNI || options.TLSTricks.PaddingSize != "") {
 		return nil, E.New("tls_tricks are not applicable to reality")
 	}
+	if options.Spoof != "" || options.SpoofMethod != "" {
+		return nil, E.New("spoof is unsupported in reality")
+	}
 
-	uClient, err := NewUTLSClient(ctx, logger, serverAddress, options)
+	uClient, err := newUTLSClient(ctx, logger, serverAddress, options, allowEmptyServerName)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +120,14 @@ func (e *RealityClientConfig) NextProtos() []string {
 
 func (e *RealityClientConfig) SetNextProtos(nextProto []string) {
 	e.uClient.SetNextProtos(nextProto)
+}
+
+func (e *RealityClientConfig) HandshakeTimeout() time.Duration {
+	return e.uClient.HandshakeTimeout()
+}
+
+func (e *RealityClientConfig) SetHandshakeTimeout(timeout time.Duration) {
+	e.uClient.SetHandshakeTimeout(timeout)
 }
 
 func (e *RealityClientConfig) STDConfig() (*STDConfig, error) {
