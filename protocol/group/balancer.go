@@ -14,7 +14,6 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/batch"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -31,10 +30,10 @@ func RegisterBalancer(registry *outbound.Registry) {
 }
 
 var (
-	_ adapter.OutboundGroup             = (*Balancer)(nil)
-	_ adapter.URLTestGroup              = (*Balancer)(nil)
-	_ adapter.ConnectionHandlerEx       = (*Balancer)(nil)
-	_ adapter.PacketConnectionHandlerEx = (*Balancer)(nil)
+	_ adapter.OutboundGroup           = (*Balancer)(nil)
+	_ adapter.URLTestGroup            = (*Balancer)(nil)
+	_ adapter.ConnectionHandler       = (*Balancer)(nil)
+	_ adapter.PacketConnectionHandler = (*Balancer)(nil)
 )
 
 // StrategyLowestDelay always routes through the outbound with the lowest
@@ -98,7 +97,7 @@ type Balancer struct {
 	interval                     time.Duration
 	concurrency                  int
 	cooldown                     time.Duration
-	history                      adapter.URLTestHistoryStorage
+	history                      *urltest.HistoryStorage
 	outbounds                    map[string]adapter.Outbound
 	ordered                      []adapter.Outbound
 	leader                       common.TypedValue[adapter.Outbound]
@@ -171,12 +170,11 @@ func (s *Balancer) Start() error {
 		s.outbounds[tag] = detour
 		s.ordered = append(s.ordered, detour)
 	}
-	if historyFromCtx := service.PtrFromContext[urltest.HistoryStorage](s.ctx); historyFromCtx != nil {
-		s.history = historyFromCtx
-	} else if clashServer := service.FromContext[adapter.ClashServer](s.ctx); clashServer != nil {
-		s.history = clashServer.HistoryStorage()
-	} else {
-		s.history = urltest.NewHistoryStorage()
+	// The box registers one history for every group and the Clash API; a private
+	// one here would leave the UI reading numbers this group never elects on.
+	s.history = service.PtrFromContext[urltest.HistoryStorage](s.ctx)
+	if s.history == nil {
+		return E.New("missing URL test history storage")
 	}
 	s.pause = service.FromContext[pause.Manager](s.ctx)
 	// Something has to be selected before the first measurement lands.
@@ -250,6 +248,13 @@ func (s *Balancer) URLTest(ctx context.Context) (map[string]uint16, error) {
 	return s.checkOutbounds(ctx, true)
 }
 
+// PerformUpdateCheck re-elects from the current measurements. The Clash API
+// calls it after probing a single member, so a manual probe can move the group
+// without waiting for the next poll.
+func (s *Balancer) PerformUpdateCheck() {
+	s.updateLeader()
+}
+
 // sweepBudget bounds one full pass. It is generous - a few hundred unreachable
 // nodes take minutes - but finite: past it the pass is abandoned, so a probe
 // that never returns cannot keep the group from measuring again.
@@ -293,7 +298,7 @@ func (s *Balancer) checkOutbounds(ctx context.Context, force bool) (map[string]u
 	var resultAccess sync.Mutex
 	for _, detour := range s.ordered {
 		tag := detour.Tag()
-		realTag := RealTag(detour)
+		realTag := RealTag(s.outbound, detour)
 		if checked[realTag] {
 			continue
 		}
@@ -343,7 +348,7 @@ func (s *Balancer) checkOutbounds(ctx context.Context, force bool) (map[string]u
 }
 
 func (s *Balancer) delay(detour adapter.Outbound) uint16 {
-	history := s.history.LoadURLTestHistory(RealTag(detour))
+	history := s.history.LoadURLTestHistory(RealTag(s.outbound, detour))
 	if history == nil || history.Delay == 0 {
 		return timeoutDelay
 	}
@@ -353,7 +358,7 @@ func (s *Balancer) delay(detour adapter.Outbound) uint16 {
 func (s *Balancer) cooling(detour adapter.Outbound, now time.Time) bool {
 	s.failAccess.Lock()
 	defer s.failAccess.Unlock()
-	state, found := s.failures[RealTag(detour)]
+	state, found := s.failures[RealTag(s.outbound, detour)]
 	return found && now.Before(state.until)
 }
 
@@ -368,7 +373,7 @@ func (s *Balancer) clearFailure(tag string) {
 // and a cooldown keeps it out of the election even if a probe revives it a
 // second later.
 func (s *Balancer) penalize(detour adapter.Outbound) {
-	tag := RealTag(detour)
+	tag := RealTag(s.outbound, detour)
 	measured := s.history.LoadURLTestHistory(tag) != nil
 	s.failAccess.Lock()
 	state := s.failures[tag]
@@ -405,7 +410,7 @@ func (s *Balancer) recheck(detour adapter.Outbound) {
 		return
 	}
 	defer s.rechecks.Add(-1)
-	tag := RealTag(detour)
+	tag := RealTag(s.outbound, detour)
 	probe, loaded := s.outbound.Outbound(tag)
 	if !loaded {
 		return
@@ -542,7 +547,7 @@ func (s *Balancer) DialContext(ctx context.Context, network string, destination 
 		s.penalize(leader)
 		return nil, err
 	}
-	s.clearFailure(RealTag(leader))
+	s.clearFailure(RealTag(s.outbound, leader))
 	return s.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 }
 
@@ -557,24 +562,16 @@ func (s *Balancer) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 		s.penalize(leader)
 		return nil, err
 	}
-	s.clearFailure(RealTag(leader))
+	s.clearFailure(RealTag(s.outbound, leader))
 	return s.interruptGroup.NewPacketConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 }
 
-func (s *Balancer) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (s *Balancer) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	ctx = interrupt.ContextWithIsExternalConnection(ctx)
 	s.connection.NewConnection(ctx, s, conn, metadata, onClose)
 }
 
-func (s *Balancer) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (s *Balancer) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	ctx = interrupt.ContextWithIsExternalConnection(ctx)
 	s.connection.NewPacketConnection(ctx, s, conn, metadata, onClose)
-}
-
-func (s *Balancer) NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	leader := s.leaderFor(metadata.Network)
-	if leader == nil {
-		return nil, E.New(metadata.Network, " is not supported by any outbound in: ", s.Tag())
-	}
-	return leader.(adapter.DirectRouteOutbound).NewDirectRouteConnection(metadata, routeContext, timeout)
 }
