@@ -26,7 +26,12 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26'
+          go-version: '1.27'
+
+      - name: Tidy check
+        # A merge that leaves go.mod or go.sum out of step fails here with the
+        # exact diff, instead of as "updates to go.mod needed" from vet.
+        run: go mod tidy -diff
 
       - name: Vet
         # unsafeptr flags upstream's own daemon and libbox code, which this fork
