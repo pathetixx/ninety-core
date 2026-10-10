@@ -71,6 +71,12 @@ const (
 	// produces failures far faster than probes complete, and without a cap the
 	// group would answer that with hundreds of parallel dials.
 	maxConcurrentRechecks = 8
+	// How many members one connection may walk through while the group picks
+	// blind, before anything is measured. Start-up work - the initial rule-set
+	// download above all - dials through the group before the first sweep, and
+	// a single refusal there aborts the whole core. Bounded, because a member
+	// that drops packets instead of refusing costs a full dial timeout.
+	maxBlindAttempts = 4
 )
 
 // Balancer routes each new connection through the lowest-delay outbound of its
@@ -537,33 +543,55 @@ func (s *Balancer) All() []string {
 }
 
 func (s *Balancer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	leader := s.leaderFor(network)
-	if leader == nil {
-		return nil, E.New("missing supported outbound")
-	}
-	conn, err := leader.DialContext(ctx, network, destination)
+	conn, err := dialThrough(ctx, s, network, func(leader adapter.Outbound) (net.Conn, error) {
+		return leader.DialContext(ctx, network, destination)
+	})
 	if err != nil {
-		s.logger.ErrorContext(ctx, err)
-		s.penalize(leader)
 		return nil, err
 	}
-	s.clearFailure(RealTag(s.outbound, leader))
 	return s.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 }
 
 func (s *Balancer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	leader := s.leaderFor(N.NetworkUDP)
-	if leader == nil {
-		return nil, E.New("missing supported outbound")
-	}
-	conn, err := leader.ListenPacket(ctx, destination)
+	conn, err := dialThrough(ctx, s, N.NetworkUDP, func(leader adapter.Outbound) (net.PacketConn, error) {
+		return leader.ListenPacket(ctx, destination)
+	})
 	if err != nil {
-		s.logger.ErrorContext(ctx, err)
-		s.penalize(leader)
 		return nil, err
 	}
-	s.clearFailure(RealTag(s.outbound, leader))
 	return s.interruptGroup.NewPacketConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
+}
+
+// dialThrough carries one connection through the leader. A measured leader
+// that fails is penalized and the error goes back to the caller: the next
+// connection gets the next leader. An unmeasured one was picked blind, and its
+// failure says nothing about the rest of the group, so the same connection
+// moves on to the member the penalty rotated in - up to maxBlindAttempts, and
+// never twice through the same member.
+func dialThrough[T any](ctx context.Context, s *Balancer, network string, dial func(adapter.Outbound) (T, error)) (T, error) {
+	var zero T
+	tried := make(map[adapter.Outbound]bool)
+	for {
+		leader := s.leaderFor(network)
+		if leader == nil {
+			return zero, E.New("missing supported outbound")
+		}
+		blind := s.delay(leader) == timeoutDelay
+		tried[leader] = true
+		conn, err := dial(leader)
+		if err == nil {
+			s.clearFailure(RealTag(s.outbound, leader))
+			return conn, nil
+		}
+		s.logger.ErrorContext(ctx, err)
+		s.penalize(leader)
+		if !blind || len(tried) >= maxBlindAttempts || ctx.Err() != nil {
+			return zero, err
+		}
+		if next := s.leaderFor(network); next == nil || tried[next] {
+			return zero, err
+		}
+	}
 }
 
 func (s *Balancer) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {

@@ -62,10 +62,15 @@ in with a `replace` directive. On this side:
 of its group and interrupts existing connections when the leader changes. Ninety
 exposes it as "Auto".
 
-It measures nothing itself: delays come from the shared URLTest history, which a
-`urltest` group over the same outbounds keeps up to date, so one health check
-feeds both the UI and this group. A failed dial drops that outbound's
-measurement, so it sorts last until the next check produces a fresh one.
+It runs its own health check and publishes the delays into the shared URLTest
+history, so the UI and the group read the same numbers. A failed dial drops that
+outbound's measurement and puts it on a cooldown that grows with repeated
+failures.
+
+Until the first check lands the group picks blind, in member order. A
+connection whose blind pick fails moves on to the next member, up to four:
+start-up work such as the initial rule-set download dials before any check, and
+one refusal there would otherwise abort the core.
 
 Only `lowest-delay` is implemented. The upstream this was modelled on also had
 round-robin, consistent-hashing and sticky-sessions strategies; Ninety never used
