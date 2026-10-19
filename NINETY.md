@@ -76,6 +76,11 @@ Only `lowest-delay` is implemented. The upstream this was modelled on also had
 round-robin, consistent-hashing and sticky-sessions strategies; Ninety never used
 them, and an unused strategy is an untested one.
 
+The group starts through `adapter.Lifecycle` (`Start(stage, scope)`), as the
+upstream groups do. When an upstream release changes that interface, port the
+balancer with it: the manager skips anything that does not match, so the group
+would come up with no members and no health check, and still compile.
+
 - `option/balancer.go` — the options.
 - `protocol/group/balancer.go` — the group.
 - `constant/proxy.go`, `include/registry.go` — type and registration.

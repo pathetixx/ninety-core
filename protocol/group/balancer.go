@@ -167,7 +167,24 @@ func NewBalancer(ctx context.Context, router adapter.Router, logger log.ContextL
 	return balancer, nil
 }
 
-func (s *Balancer) Start() error {
+// Since v1.14.3 the outbound manager starts only adapter.Lifecycle; a group
+// that still exposes the old Start/PostStart pair is never started at all -
+// no members, no leader, no health checks - and the Clash API's re-election
+// after a manual probe divides by an empty member list.
+var _ adapter.Lifecycle = (*Balancer)(nil)
+
+func (s *Balancer) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	switch stage {
+	case adapter.StartStateStart:
+		return s.start()
+	case adapter.StartStatePostStart:
+		s.postStart()
+		scope.Add(s.Close)
+	}
+	return nil
+}
+
+func (s *Balancer) start() error {
 	for i, tag := range s.tags {
 		detour, loaded := s.outbound.Outbound(tag)
 		if !loaded {
@@ -188,11 +205,10 @@ func (s *Balancer) Start() error {
 	return nil
 }
 
-func (s *Balancer) PostStart() error {
+func (s *Balancer) postStart() {
 	s.updateLeader()
 	go s.loop()
 	go s.checkLoop()
-	return nil
 }
 
 func (s *Balancer) Close() error {
@@ -467,6 +483,9 @@ func (s *Balancer) elect() adapter.Outbound {
 	}
 	if fallback != nil {
 		return fallback
+	}
+	if len(s.ordered) == 0 {
+		return nil
 	}
 	return s.ordered[int(s.rotation.Load()%uint64(len(s.ordered)))]
 }

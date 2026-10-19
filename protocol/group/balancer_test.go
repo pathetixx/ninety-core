@@ -14,6 +14,7 @@ import (
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/service"
 )
 
 const testDestinationHost = "rule-set.test"
@@ -144,5 +145,44 @@ func TestBalancerBlindDialIsBounded(t *testing.T) {
 	}
 	if total != maxBlindAttempts {
 		t.Errorf("tried %d members, want %d", total, maxBlindAttempts)
+	}
+}
+
+// The outbound manager starts groups only through adapter.Lifecycle. v1.14.3
+// dropped the legacy Start/PostStart path, and a balancer still on it was left
+// with no members: every Clash API probe then panicked in elect.
+func TestBalancerStartsThroughLifecycle(t *testing.T) {
+	manager := &testOutboundManager{members: map[string]adapter.Outbound{
+		"a": &testMember{tag: "a"},
+		"b": &testMember{tag: "b"},
+	}}
+	balancer := &Balancer{
+		ctx:            service.ContextWithPtr(context.Background(), urltest.NewHistoryStorage()),
+		outbound:       manager,
+		logger:         logger.NOP(),
+		tags:           []string{"a", "b"},
+		outbounds:      make(map[string]adapter.Outbound),
+		failures:       make(map[string]failureState),
+		cooldown:       defaultFailureCooldown,
+		interruptGroup: interrupt.NewGroup(),
+		close:          make(chan struct{}),
+	}
+	var lifecycle adapter.Lifecycle = balancer
+	if err := lifecycle.Start(adapter.StartStateStart, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(balancer.ordered) != 2 {
+		t.Fatalf("started with %d members, want 2", len(balancer.ordered))
+	}
+	if now := balancer.Now(); now != "a" {
+		t.Errorf("leader before the first sweep is %q, want %q", now, "a")
+	}
+}
+
+func TestBalancerUpdateCheckBeforeStart(t *testing.T) {
+	balancer := &Balancer{tags: []string{"a"}, close: make(chan struct{})}
+	balancer.PerformUpdateCheck()
+	if leader := balancer.leader.Load(); leader != nil {
+		t.Errorf("unstarted group elected %q", leader.Tag())
 	}
 }
