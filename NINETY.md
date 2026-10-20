@@ -106,6 +106,19 @@ SNI, so rewriting that message is both risky and pointless.
 - `common/tls/utls_client.go` — applied per connection.
 - `common/tls/std_client.go`, `common/tls/reality_client.go` — the refusals.
 
+### Optional remote rule-sets
+
+`optional: true` on a remote rule-set lets the box start when its first
+download fails: the set stays empty, so rules referencing it match nothing, and
+it is retried after 1, 2, 4… minutes (at most 30) until it loads, then on the
+usual `update_interval`. Ninety marks the lists a user picks for their own
+routing rules this way - a list that is unreachable or removed upstream must
+not stop the connection. Sets without the flag fail the start as upstream does.
+
+- `option/rule_set.go` — the option.
+- `route/rule/rule_set_remote.go` — empty start instead of an error.
+- `route/rule/rule_set_updater.go` — the retry backoff.
+
 ### Dependency versions
 
 The security-relevant bumps live in `go.mod` here rather than being applied at

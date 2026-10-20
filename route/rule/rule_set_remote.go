@@ -132,6 +132,11 @@ func (s *RemoteRuleSet) StartContext(ctx context.Context, startContext *adapter.
 	if s.lastUpdated.IsZero() && !loadedFromInitialPath {
 		err = s.fetch(ctx, true)
 		if err != nil {
+			if s.options.RemoteOptions.Optional {
+				// Empty until a retry lands: rules referencing it match nothing.
+				s.logger.Warn("initial rule-set ", s.tag, " unavailable, starting without it: ", err)
+				return nil
+			}
 			return E.Cause(err, "initial rule-set: ", s.tag)
 		}
 	}
@@ -224,13 +229,14 @@ func (s *RemoteRuleSet) loadBytes(content []byte) error {
 	return nil
 }
 
-func (s *RemoteRuleSet) updateOnce() {
+func (s *RemoteRuleSet) updateOnce() error {
 	err := s.fetch(s.ctx, false)
 	if err != nil {
 		s.logger.Error("fetch rule-set ", s.tag, ": ", err)
 	} else if s.refs.Load() == 0 {
 		s.rules = nil
 	}
+	return err
 }
 
 func (s *RemoteRuleSet) fetch(ctx context.Context, isStart bool) error {

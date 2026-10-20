@@ -183,6 +183,11 @@ type RemoteRuleSet struct {
 	InitialPath    string             `json:"initial_path,omitempty"`
 	HTTPClient     *HTTPClientOptions `json:"http_client,omitempty"`
 	UpdateInterval badoption.Duration `json:"update_interval,omitempty"`
+	// Optional starts the box with an empty rule-set when the first download
+	// fails, instead of failing the whole start. Ninety delta: a user-picked
+	// list that is unreachable or gone upstream must not take the connection
+	// down with it.
+	Optional bool `json:"optional,omitempty"`
 	// Deprecated: use http_client instead
 	DownloadDetour string `json:"download_detour,omitempty" reference:"outbound" schema:"omit"`
 }

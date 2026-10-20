@@ -44,6 +44,7 @@ func (u *RuleSetUpdater) Close() error {
 
 func (u *RuleSetUpdater) loopUpdate() {
 	nextUpdates := make([]time.Time, len(u.ruleSets))
+	failures := make([]int, len(u.ruleSets))
 	for i, ruleSet := range u.ruleSets {
 		nextUpdates[i] = ruleSet.lastUpdated.Add(ruleSet.updateInterval)
 	}
@@ -61,8 +62,8 @@ func (u *RuleSetUpdater) loopUpdate() {
 			if now.Before(nextUpdates[i]) {
 				continue
 			}
-			ruleSet.updateOnce()
-			nextUpdates[i] = now.Add(ruleSet.updateInterval)
+			err := ruleSet.updateOnce()
+			nextUpdates[i] = now.Add(nextUpdateDelay(ruleSet, err, &failures[i]))
 			updated = true
 		}
 		if updated {
@@ -70,6 +71,31 @@ func (u *RuleSetUpdater) loopUpdate() {
 		}
 		timer.Reset(waitUntilNext(nextUpdates))
 	}
+}
+
+// An optional rule-set that has never loaded is retried on a short backoff
+// instead of waiting out the whole update interval - days, for Ninety's lists -
+// with its rules matching nothing in the meantime.
+const (
+	optionalRetryMin = time.Minute
+	optionalRetryMax = 30 * time.Minute
+)
+
+func nextUpdateDelay(ruleSet *RemoteRuleSet, err error, failures *int) time.Duration {
+	if err == nil || !ruleSet.options.RemoteOptions.Optional || !ruleSet.lastUpdated.IsZero() {
+		*failures = 0
+		return ruleSet.updateInterval
+	}
+	delay := optionalRetryMin << *failures
+	if delay <= 0 || delay > optionalRetryMax {
+		delay = optionalRetryMax
+	} else {
+		*failures++
+	}
+	if delay > ruleSet.updateInterval {
+		delay = ruleSet.updateInterval
+	}
+	return delay
 }
 
 func waitUntilNext(nextUpdates []time.Time) time.Duration {
