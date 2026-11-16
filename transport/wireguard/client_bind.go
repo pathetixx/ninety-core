@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing/common"
@@ -35,6 +36,18 @@ type ClientBind struct {
 	isConnect           bool
 	connectAddr         netip.AddrPort
 	reserved            [3]uint8
+	// preserveReceived keeps incoming packets byte for byte. Clearing bytes
+	// 1..3 is for WARP, which puts its reserved routing key there; under
+	// AmneziaWG shaping the same bytes are padding, a magic header or the
+	// header-protection nonce, and clearing them makes every packet unreadable.
+	preserveReceived atomic.Bool
+}
+
+// SetPreserveReceived implements conn.ReceivePreserver: the WireGuard device
+// turns the reserved-byte clearing off when AmneziaWG shaping is configured
+// (reserved bytes and shaping cannot be combined, so nothing is lost).
+func (c *ClientBind) SetPreserveReceived(preserve bool) {
+	c.preserveReceived.Store(preserve)
 }
 
 func NewClientBind(ctx context.Context, logger logger.Logger, dialer N.Dialer, isConnect bool, connectAddr netip.AddrPort, reserved [3]uint8) *ClientBind {
@@ -135,7 +148,7 @@ func (c *ClientBind) receive(packets [][]byte, sizes []int, eps []conn.Endpoint)
 		return
 	}
 	sizes[0] = n
-	if n > 3 {
+	if n > 3 && !c.preserveReceived.Load() {
 		b := packets[0]
 		clear(b[1:4])
 	}
