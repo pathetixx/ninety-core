@@ -199,4 +199,4 @@ require (
 	zombiezen.com/go/capnproto2 v2.18.2+incompatible // indirect
 )
 
-replace github.com/sagernet/wireguard-go => github.com/pathetixx/ninety-wireguard-go v0.0.0-20261116034621-c80dd73ece77
+replace github.com/sagernet/wireguard-go => github.com/pathetixx/ninety-wireguard-go v0.0.0-20261116035612-bab9a67fdf9a
