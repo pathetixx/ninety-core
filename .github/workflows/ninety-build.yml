@@ -49,5 +49,7 @@ jobs:
             -o sing-box.exe ./cmd/sing-box
           ls -lh sing-box.exe
 
+      # The packages that carry Ninety's delta: unified delay, the balancer and
+      # optional remote rule-sets.
       - name: Test
-        run: go test -tags "$TAGS" ./common/urltest/... ./protocol/group/...
+        run: go test -tags "$TAGS" ./common/urltest/... ./protocol/group/... ./route/rule/...
