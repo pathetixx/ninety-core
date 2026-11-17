@@ -46,7 +46,7 @@ func (u *RuleSetUpdater) loopUpdate() {
 	nextUpdates := make([]time.Time, len(u.ruleSets))
 	failures := make([]int, len(u.ruleSets))
 	for i, ruleSet := range u.ruleSets {
-		nextUpdates[i] = ruleSet.lastUpdated.Add(ruleSet.updateInterval)
+		nextUpdates[i] = firstUpdate(ruleSet, time.Now())
 	}
 	timer := time.NewTimer(0)
 	defer timer.Stop()

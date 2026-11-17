@@ -130,7 +130,7 @@ func (s *RemoteRuleSet) StartContext(ctx context.Context, startContext *adapter.
 		}
 	}
 	if s.lastUpdated.IsZero() && !loadedFromInitialPath {
-		err = s.fetch(ctx, true)
+		err = s.initialFetch(ctx)
 		if err != nil {
 			if s.options.RemoteOptions.Optional {
 				// Empty until a retry lands: rules referencing it match nothing.
@@ -230,7 +230,13 @@ func (s *RemoteRuleSet) loadBytes(content []byte) error {
 }
 
 func (s *RemoteRuleSet) updateOnce() error {
-	err := s.fetch(s.ctx, false)
+	ctx := s.ctx
+	if s.options.RemoteOptions.Optional {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, optionalFetchTimeout)
+		defer cancel()
+	}
+	err := s.fetch(ctx, false)
 	if err != nil {
 		s.logger.Error("fetch rule-set ", s.tag, ": ", err)
 	} else if s.refs.Load() == 0 {

@@ -154,7 +154,10 @@ func (r *Router) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 			}
 			ruleSetStartGroup.Concurrency(5)
 			ruleSetStartGroup.FastFail()
-			err := ruleSetStartGroup.Run(r.ctx)
+			// One budget for the first download of every optional set, across
+			// both concurrency waves.
+			ruleSetCtx := R.ContextWithOptionalStartDeadline(r.ctx, time.Now().Add(R.OptionalRuleSetStartBudget))
+			err := ruleSetStartGroup.Run(ruleSetCtx)
 			monitor.Finish()
 			if err != nil {
 				return err

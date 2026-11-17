@@ -115,9 +115,22 @@ usual `update_interval`. Ninety marks the lists a user picks for their own
 routing rules this way - a list that is unreachable or removed upstream must
 not stop the connection. Sets without the flag fail the start as upstream does.
 
+A slow download is treated like a failed one. The first downloads of all
+optional sets share a 3-second budget at start: they go out through outbounds
+that have not been checked yet - Ninety's "Auto" balancer picks blind - and a
+member that connects and then stalls held the start until the app gave up on the
+core. That happened on a fresh install with provider placeholder servers at the
+top of the subscription; an install that already had the lists cached never
+noticed. A set the start left empty gets its first retry after 15 seconds,
+once the groups have measured their members, and every background download of
+an optional set is capped at a minute, because the updater fetches the sets one
+after another.
+
 - `option/rule_set.go` — the option.
 - `route/rule/rule_set_remote.go` — empty start instead of an error.
+- `route/rule/rule_set_optional.go` — the start budget and the first retry.
 - `route/rule/rule_set_updater.go` — the retry backoff.
+- `route/router.go` — one budget for every optional set's first download.
 
 ### Dependency versions
 
